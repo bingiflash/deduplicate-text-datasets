@@ -1293,12 +1293,16 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
     }
 
     let _answer = crossbeam::scope(|scope| {
+        let chunk_size = lines.len() / num_threads-1;
         for i in 0..num_threads {
             let st = &st;
             let lines = lines.clone();
-            let start = i * (lines.len() / num_threads);
-            let end = (i + 1) * (lines.len() / num_threads);
-            let lines = lines[start..end].to_vec();   // losing some lines here
+            let start = i * chunk_size;
+            let mut end = (i + 1) * chunk_size;
+            if i == num_threads - 1 {
+                end = lines.len();
+            }
+            let lines = lines[start..end].to_vec();
             let handle = scope.spawn(move || {
                 worker(st, lines, ngram_size)
             });
