@@ -60,10 +60,13 @@ extern crate filebuffer;
 extern crate zstd;
 extern crate crossbeam;
 extern crate clap;
+extern crate regex;
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use clap::{Parser, Subcommand};
+
+// use regex::Regex;
 
 mod table;
 
@@ -150,6 +153,13 @@ enum Commands {
         cache_dir: String,
         #[clap(short, long)]
         length_threshold: u64,
+    },
+
+    Contains {
+        #[clap(short, long)]
+        data_file: String,
+        #[clap(short, long)]
+        query_file: String,
     }
     
 }
@@ -1208,6 +1218,157 @@ fn cmd_collect(data_file: &String, cache_dir: &String, length_threshold: u64)  -
     Ok(())
 }
 
+fn generate_ngrams(s: String, n: u32) -> Vec<String> {
+    // Convert to lowercases
+    // let mut s = s.to_lowercase();
+    
+    // Replace all none alphanumeric characters with spaces
+    // let re = Regex::new(r"[^a-zA-Z0-9\s]").unwrap();
+    // let s = re.replace_all(&s, " ").to_string();
+    
+    // Break sentence in the token, remove empty tokens
+    let tokens = s.split(' ').filter(|token| !token.is_empty());
+
+    
+    // Use the zip function to help us generate n-grams
+    // Concatentate the tokens into ngrams and return
+    let ngrams = tokens.map(|token| token.to_string()).collect::<Vec<String>>();
+    
+    // if no.of ngrams is less than n, return ngrams
+    if ngrams.len() < n as usize {
+        return ngrams;
+    }
+
+    let ngrams = ngrams.windows(n.try_into().unwrap()).map(|ngram| ngram.join(" ")).collect();
+    ngrams
+}
+
+fn cmd_contains(data_file: &String, query_file: &String) -> std::io::Result<()>{
+    let now = Instant::now();
+    println!("Reading the dataset at time t={}ms", now.elapsed().as_millis());
+    let mut text_ = Vec::with_capacity(std::fs::metadata(data_file.clone()).unwrap().len() as usize);
+    fs::File::open(data_file.clone()).unwrap().read_to_end(&mut text_)?;
+    let text = &text_;
+    println!("Done reading the dataset at time t={}ms", now.elapsed().as_millis());
+    println!("... and now starting the suffix array construction.");
+    
+    let st = table::SuffixTable::new(text);
+    println!("Done building suffix array at t={}ms",now.elapsed().as_millis());
+    
+    let q_file = File::open(query_file)?;
+    let q_reader = BufReader::new(q_file);
+
+    fn worker(st: &table::SuffixTable, lines: Vec<String>) -> usize {
+        let mut count = 0;
+        for line in lines {
+            let ngrams = generate_ngrams(line, 3);
+            let length_of_ngrams = ngrams.len();
+            let mut ngram_match_count = 0;
+            for ngram in ngrams {
+                if st.contains(ngram.as_bytes()) {
+                    ngram_match_count += 1;
+                }
+            }
+            let match_ratio = ngram_match_count as f64 / length_of_ngrams as f64;
+            let threshold = 0.7;
+            // println!("{} {}", match_ratio, match_ratio >= threshold);
+            if match_ratio >= threshold {
+                count += 1;
+            }
+        }
+        return count;
+    }
+
+    let num_threads = 8;
+
+    let mut handles = vec![];
+    let mut lines = vec![];
+    let mut count = 0;
+
+    for line in q_reader.lines() {
+        let line = line.unwrap();
+        lines.push(line);
+    }
+
+    let _answer = crossbeam::scope(|scope| {
+        for i in 0..num_threads {
+            let st = &st;
+            let lines = lines.clone();
+            let start = i * (lines.len() / num_threads);
+            let end = (i + 1) * (lines.len() / num_threads);
+            let lines = lines[start..end].to_vec();   // losing some lines here
+            let handle = scope.spawn(move || {
+                worker(st, lines)
+            });
+            handles.push(handle);
+        }
+        for handle in handles {
+            count += handle.join()
+        }
+    });
+
+    // for i in 0..num_threads {
+    //     let st = st.clone();
+    //     let lines = lines.clone();
+    //     let handle = thread::spawn(move || {
+    //         let start = i * (lines.len() / num_threads);
+    //         let end = (i + 1) * (lines.len() / num_threads);
+    //         let lines = lines[start..end].to_vec();
+    //         worker(&st, lines)
+    //     });
+    //     handles.push(handle);
+    // }
+
+    // for handle in handles {
+    //     count += handle.join().unwrap();
+    // }
+
+    println!("{} lines matched - {}", count, now.elapsed().as_millis());
+
+    // // counter variable
+    // let mut counter = 0;
+
+    // // count the number of lines in the query file
+    // let mut num_lines = 0;
+
+    // for line in q_reader.lines() {
+    //     let line_str = line.unwrap().clone();
+    //     let ngrams = generate_ngrams(line_str, 8);
+    //     let mut ngram_match_count = 0;
+    //     let mut ngram_count = 0;
+
+    //     for ngram in ngrams {
+    //         let result = st.contains(ngram.as_bytes());
+    //         if result {
+    //             ngram_match_count += 1;
+    //         }
+    //         ngram_count += 1;
+    //         // print the ngram(string) and result
+    //         // println!("{} {}", ngram, result);
+    //     }
+    //     let match_ratio = ngram_match_count as f64 / ngram_count as f64;
+    //     let threshold = 0.7;
+    //     // println!("{} {}", match_ratio, match_ratio >= threshold);
+    //     if match_ratio >= threshold {
+    //         counter += 1;
+    //     }
+    //     else{
+    //         println!("{} {}", match_ratio, match_ratio >= threshold);
+    //     }
+
+    //     // let result = st.contains(line_str.as_bytes());
+    //     // if result {
+    //     //     counter += 1;
+    //     // }
+    //     num_lines += 1;
+    //     // println!("{} {}", line_str, result);
+    // }
+
+    // println!("duplicate lines - {}\ntotal lines - {}\ncontamination rate - {}", counter, num_lines, counter as f64 / num_lines as f64);
+
+    Ok(())
+}
+
 fn main()  -> std::io::Result<()> {
     
     let args = Args::parse();
@@ -1250,6 +1411,10 @@ fn main()  -> std::io::Result<()> {
 
         Commands::Collect { data_file, cache_dir, length_threshold } => {
             cmd_collect(data_file, cache_dir, *length_threshold)?;
+        }
+
+        Commands::Contains { data_file, query_file } => {
+            cmd_contains(data_file, query_file)?;
         }
     }
     

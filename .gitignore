@@ -1,0 +1,9 @@
+venv/*
+wsl-venv/*
+target/*
+aws/*
+aws*
+tmp/*
+!tmp/.keep
+data/*
+Cargo.lock
