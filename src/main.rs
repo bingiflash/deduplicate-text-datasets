@@ -160,6 +160,10 @@ enum Commands {
         data_file: String,
         #[clap(short, long)]
         query_file: String,
+        #[clap(short, long, default_value_t = 8)]
+        gram_size: usize,
+        #[clap(short, long, default_value_t = 8)]
+        num_threads: usize,
     }
     
 }
@@ -1243,7 +1247,7 @@ fn generate_ngrams(s: String, n: u32) -> Vec<String> {
     ngrams
 }
 
-fn cmd_contains(data_file: &String, query_file: &String) -> std::io::Result<()>{
+fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_threads: usize) -> std::io::Result<()>{
     let now = Instant::now();
     println!("Reading the dataset at time t={}ms", now.elapsed().as_millis());
     let mut text_ = Vec::with_capacity(std::fs::metadata(data_file.clone()).unwrap().len() as usize);
@@ -1258,10 +1262,10 @@ fn cmd_contains(data_file: &String, query_file: &String) -> std::io::Result<()>{
     let q_file = File::open(query_file)?;
     let q_reader = BufReader::new(q_file);
 
-    fn worker(st: &table::SuffixTable, lines: Vec<String>) -> usize {
+    fn worker(st: &table::SuffixTable, lines: Vec<String>, ngram_size:  usize) -> usize {
         let mut count = 0;
         for line in lines {
-            let ngrams = generate_ngrams(line, 3);
+            let ngrams = generate_ngrams(line.clone(), ngram_size as u32);
             let length_of_ngrams = ngrams.len();
             let mut ngram_match_count = 0;
             for ngram in ngrams {
@@ -1271,15 +1275,13 @@ fn cmd_contains(data_file: &String, query_file: &String) -> std::io::Result<()>{
             }
             let match_ratio = ngram_match_count as f64 / length_of_ngrams as f64;
             let threshold = 0.7;
-            // println!("{} {}", match_ratio, match_ratio >= threshold);
+            // println!("{} {} {}", line.clone(), match_ratio, match_ratio >= threshold);
             if match_ratio >= threshold {
                 count += 1;
             }
         }
         return count;
     }
-
-    let num_threads = 8;
 
     let mut handles = vec![];
     let mut lines = vec![];
@@ -1298,7 +1300,7 @@ fn cmd_contains(data_file: &String, query_file: &String) -> std::io::Result<()>{
             let end = (i + 1) * (lines.len() / num_threads);
             let lines = lines[start..end].to_vec();   // losing some lines here
             let handle = scope.spawn(move || {
-                worker(st, lines)
+                worker(st, lines, ngram_size)
             });
             handles.push(handle);
         }
@@ -1307,64 +1309,7 @@ fn cmd_contains(data_file: &String, query_file: &String) -> std::io::Result<()>{
         }
     });
 
-    // for i in 0..num_threads {
-    //     let st = st.clone();
-    //     let lines = lines.clone();
-    //     let handle = thread::spawn(move || {
-    //         let start = i * (lines.len() / num_threads);
-    //         let end = (i + 1) * (lines.len() / num_threads);
-    //         let lines = lines[start..end].to_vec();
-    //         worker(&st, lines)
-    //     });
-    //     handles.push(handle);
-    // }
-
-    // for handle in handles {
-    //     count += handle.join().unwrap();
-    // }
-
-    println!("{} lines matched - {}", count, now.elapsed().as_millis());
-
-    // // counter variable
-    // let mut counter = 0;
-
-    // // count the number of lines in the query file
-    // let mut num_lines = 0;
-
-    // for line in q_reader.lines() {
-    //     let line_str = line.unwrap().clone();
-    //     let ngrams = generate_ngrams(line_str, 8);
-    //     let mut ngram_match_count = 0;
-    //     let mut ngram_count = 0;
-
-    //     for ngram in ngrams {
-    //         let result = st.contains(ngram.as_bytes());
-    //         if result {
-    //             ngram_match_count += 1;
-    //         }
-    //         ngram_count += 1;
-    //         // print the ngram(string) and result
-    //         // println!("{} {}", ngram, result);
-    //     }
-    //     let match_ratio = ngram_match_count as f64 / ngram_count as f64;
-    //     let threshold = 0.7;
-    //     // println!("{} {}", match_ratio, match_ratio >= threshold);
-    //     if match_ratio >= threshold {
-    //         counter += 1;
-    //     }
-    //     else{
-    //         println!("{} {}", match_ratio, match_ratio >= threshold);
-    //     }
-
-    //     // let result = st.contains(line_str.as_bytes());
-    //     // if result {
-    //     //     counter += 1;
-    //     // }
-    //     num_lines += 1;
-    //     // println!("{} {}", line_str, result);
-    // }
-
-    // println!("duplicate lines - {}\ntotal lines - {}\ncontamination rate - {}", counter, num_lines, counter as f64 / num_lines as f64);
+    println!("{}", count);
 
     Ok(())
 }
@@ -1413,8 +1358,8 @@ fn main()  -> std::io::Result<()> {
             cmd_collect(data_file, cache_dir, *length_threshold)?;
         }
 
-        Commands::Contains { data_file, query_file } => {
-            cmd_contains(data_file, query_file)?;
+        Commands::Contains { data_file, query_file, gram_size: ngram_size, num_threads } => {
+            cmd_contains(data_file, query_file, *ngram_size, *num_threads)?;
         }
     }
     
