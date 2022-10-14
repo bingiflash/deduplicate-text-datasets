@@ -5,15 +5,15 @@ import shutil
 import time
 import uuid
 
-# generate a random UUID
-unique_id = str(uuid.uuid4())
+# if AWS_BATCH_JOB_ID exists, use it as unique id else use uuid
+unique_id = os.environ.get('AWS_BATCH_JOB_ID', str(uuid.uuid4()))
 
 import s3_accessor
 from tqdm import tqdm
 
 data_dir = './data'
 temp_folder = './tmp/rate'
-content_column = "content"
+content_column = "text"
 
 def get_line_seperator():
     return b"\xff\xff"
@@ -114,7 +114,7 @@ def main(train_files_path, val_files_path, result_dir):
         f.write(json.dumps(list(total_val_contaminated_lines)))
         f.write("\n")
     # copy contaminated lines s3 result dir
-    s3_accessor.upload(f"{result_dir.strip('/')}/{unique_id}-{array_index}-contaminated_lines.txt", line_indicies_file_path)
+    s3_accessor.upload(f"{result_dir.strip('/')}/{unique_id}/{array_index}-contaminated_lines.txt", line_indicies_file_path)
     print(f"Dataset contamination rate: {dataset_contamination_rate}")
 
 
