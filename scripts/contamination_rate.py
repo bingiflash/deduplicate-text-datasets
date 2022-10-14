@@ -4,9 +4,10 @@ import sys
 import time
 
 import s3_accessor
+from tqdm import tqdm
 
 temp_folder = './tmp/rate'
-content_column = "content"
+content_column = "text"
 
 def get_line_seperator():
     return b"\xff\xff"
@@ -39,7 +40,7 @@ def get_files(path):
 
 def extract_lines_from_jsonl_files(files, output_file, include_newline=True):
     with open(output_file, 'wb') as of:
-        for file in files:
+        for file in tqdm(files):
             with open(file, 'r') as f:
                 for line in f.readlines():
                     modified_line = json.loads(line)[content_column].replace('\n', ' ')
