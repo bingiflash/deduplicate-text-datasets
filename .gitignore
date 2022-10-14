@@ -7,3 +7,4 @@ tmp/*
 !tmp/.keep
 data/*
 Cargo.lock
+scripts/__pycache__/*

@@ -9,6 +9,6 @@ python3 -m venv venv
 source venv/bin/activate
 
 pip install --upgrade pip
-pip install numpy scipy transformers sentencepiece
+pip install numpy scipy transformers sentencepiece s3urls boto3
 
 cargo build

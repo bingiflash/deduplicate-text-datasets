@@ -1264,11 +1264,11 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
     let q_reader = BufReader::new(q_file);
 
     fn worker(st: &table::SuffixTable, lines: Vec<String>, ngram_size:  usize, worker_index_offset: usize) -> Vec<usize> {
-        let mut count = 0;
         // contaminated lines list
         let mut contaminated_lines: Vec<usize> = Vec::with_capacity(lines.len());
         // enumerate over the lines
         for (i, line) in lines.iter().enumerate() {
+            let line_start =Instant::now();
             let ngrams = generate_ngrams(line.clone(), ngram_size as u32);
             let length_of_ngrams = ngrams.len();
             let mut ngram_match_count = 0;
@@ -1281,24 +1281,21 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
             let threshold = 0.7;
             // println!("{} {} {}", line.clone(), match_ratio, match_ratio >= threshold);
             if match_ratio >= threshold {
-                count += 1;
                 contaminated_lines.push(i+worker_index_offset);
             }
+            println!("line {} took {}ms to perform contains operation",i+worker_index_offset, line_start.elapsed().as_millis());
         }
         //  return contaminated lines
         return contaminated_lines
     }
 
     let mut handles = vec![];
-    let mut lines = vec![];
-    
-    for line in q_reader.lines() {
-        let line = line.unwrap();
-        lines.push(line);
-    }
+    let lines = q_reader.lines().map(|l| l.unwrap()).collect::<Vec<String>>();
 
     let mut final_contaminated_lines: Vec<usize> = Vec::with_capacity(lines.len());
-    
+
+    let before_contains = Instant::now();
+
     let _answer = crossbeam::scope(|scope| {
         let chunk_size = lines.len() / num_threads;
         println!("Chunk size: {}", chunk_size);
@@ -1322,6 +1319,7 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
             final_contaminated_lines.extend(temp_contaminated_lines);
         }
     });
+    println!("Done with contains. Took {}ms", before_contains.elapsed().as_millis());
     
     // print contaminated lines vector
     println!("{:?}", final_contaminated_lines);
