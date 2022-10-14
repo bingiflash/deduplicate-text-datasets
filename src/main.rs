@@ -1266,9 +1266,9 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
     fn worker(st: &table::SuffixTable, lines: Vec<String>, ngram_size:  usize, worker_index_offset: usize) -> Vec<usize> {
         // contaminated lines list
         let mut contaminated_lines: Vec<usize> = Vec::with_capacity(lines.len());
+        let worker_start =Instant::now();
         // enumerate over the lines
         for (i, line) in lines.iter().enumerate() {
-            let line_start =Instant::now();
             let ngrams = generate_ngrams(line.clone(), ngram_size as u32);
             let length_of_ngrams = ngrams.len();
             let mut ngram_match_count = 0;
@@ -1283,8 +1283,8 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
             if match_ratio >= threshold {
                 contaminated_lines.push(i+worker_index_offset);
             }
-            println!("line {} took {}ms to perform contains operation",i+worker_index_offset, line_start.elapsed().as_millis());
         }
+        println!("Worker finished in {}ms", worker_start.elapsed().as_millis());
         //  return contaminated lines
         return contaminated_lines
     }
@@ -1301,17 +1301,17 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
         println!("Chunk size: {}", chunk_size);
         for i in 0..num_threads {
             let st = &st;
-            let lines = lines.clone();
             let start = i * chunk_size;
             let mut end = (i + 1) * chunk_size;
             if i == num_threads - 1 {
                 end = lines.len();
             }
-            let lines = lines[start..end].to_vec();
+            let sub_lines = lines[start..end].to_vec();
             let handle = scope.spawn(move || {
-                worker(st, lines, ngram_size, i*chunk_size)
+                worker(st, sub_lines, ngram_size, i*chunk_size)
             });
             handles.push(handle);
+            println!("Spawned thread {}", i);
         }
         for handle in handles {
             let temp_contaminated_lines = handle.join();
