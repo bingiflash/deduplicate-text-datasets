@@ -92,3 +92,7 @@ def _nextS3Object(bucket, prefixes = None, suffixes = None):
 def getNextKey(bucket, prefixes = None, suffixes = None):
     for obj in _nextS3Object(bucket, prefixes, suffixes):
         yield obj["Key"]
+
+def getBucketNameAndPrefix(s3_url_string):
+    s3_url = parse_url(s3_url_string)
+    return s3_url['bucket'], s3_url['key']

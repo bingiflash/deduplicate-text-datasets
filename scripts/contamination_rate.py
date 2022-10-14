@@ -1,13 +1,19 @@
+import argparse
 import json
 import os
-import sys
+import shutil
 import time
+import uuid
+
+# generate a random UUID
+unique_id = str(uuid.uuid4())
 
 import s3_accessor
 from tqdm import tqdm
 
+data_dir = './data'
 temp_folder = './tmp/rate'
-content_column = "text"
+content_column = "content"
 
 def get_line_seperator():
     return b"\xff\xff"
@@ -62,7 +68,7 @@ def remove_lines_from_a_file(file_path, lines_to_remove):
             file.write(lines[i])
     file.close()
 
-def main(val_files_path, train_files_path):
+def main(train_files_path, val_files_path, result_dir):
     val_files = get_files(val_files_path)
     train_files = get_files(train_files_path)
     
@@ -71,7 +77,7 @@ def main(val_files_path, train_files_path):
 
     dataset_contamination_rate = 0
     total_val_lines = 0
-    total_val_contaminated_lines = 0
+    total_val_contaminated_lines = set()
 
     modified_val_file = os.path.join(temp_folder, 'val.txt')
     print("Extracting lines from val files...")
@@ -98,24 +104,70 @@ def main(val_files_path, train_files_path):
         print("Rust execution took {} seconds".format(time.time() - tic))
         print(rust_result)
         val_batch_contaminated_lines = find_no_of_contaminated_lines_from_rust_result(rust_result)
-        total_val_contaminated_lines += len(val_batch_contaminated_lines)
+        total_val_contaminated_lines.update(val_batch_contaminated_lines)
         print("=========================================")
         remove_lines_from_a_file(modified_val_file, val_batch_contaminated_lines)
 
-    dataset_contamination_rate = total_val_contaminated_lines / total_val_lines
+    dataset_contamination_rate = len(total_val_contaminated_lines) / total_val_lines
+    line_indicies_file_path = os.path.join(temp_folder, f'{unique_id}-{array_index}-contaminated_lines.txt')
+    with open(line_indicies_file_path, 'w') as f:
+        f.write(json.dumps(list(total_val_contaminated_lines)))
+        f.write("\n")
+    # copy contaminated lines s3 result dir
+    s3_accessor.upload(f"{result_dir.strip('/')}/{unique_id}-{array_index}-contaminated_lines.txt", line_indicies_file_path)
     print(f"Dataset contamination rate: {dataset_contamination_rate}")
 
-    
-# copy_s3_to_local(['https://vbingi-dev.s3.amazonaws.com/temp_manifest.json'],['https://vbingi-dev.s3.amazonaws.com/temp_manifest.json'],'./data')
-def copy_s3_to_local(train_files, val_files, data_dir):
+
+def copy_s3_to_local(train_files, val_files, train_dir, val_dir):
     for train_file in train_files:
-        s3_accessor.download_to_local(train_file, data_dir+'/train_data/')
+        s3_accessor.download_to_local(train_file, train_dir)
     for val_file in val_files:
-        s3_accessor.download_to_local(val_file, data_dir+'/val_data/')
+        s3_accessor.download_to_local(val_file, val_dir)
     
 if __name__ == "__main__":
-    train_files_path = sys.argv[1]
-    val_files_path = sys.argv[2]
-    # array_size = int(sys.argv[3])
-    # array_index = int(sys.argv[4])
-    main(val_files_path, train_files_path)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train_files', type=str, required=True, help='S3 path to train files. (Provide dir or file)')
+    parser.add_argument('--val_files', type=str, required=True, help='S3 path to val files. (Provide dir or file)')
+    parser.add_argument('--result_dir', type=str, default="s3://vbingi-dev/batch-jobs/", help='result directory remote path')
+    parser.add_argument('--array_size', type=int, default=1, help='Array size')
+    parser.add_argument('--array_index', type=int, default=0, help='Array index')
+
+    args = parser.parse_args()
+    train_files_remote_path = args.train_files
+    val_files_remote_path = args.val_files
+    result_dir = args.result_dir
+    array_size = args.array_size
+    array_index = args.array_index
+
+    val_files_local_dir = os.path.join(data_dir, 'val')
+    train_files_local_dir = os.path.join(data_dir, 'train')
+
+    # check if the directories exist
+    if os.path.exists(val_files_local_dir):
+        shutil.rmtree(val_files_local_dir)
+    if os.path.exists(train_files_local_dir):
+        shutil.rmtree(train_files_local_dir)
+
+    # create the directories
+    os.makedirs(val_files_local_dir, exist_ok=True)
+    os.makedirs(train_files_local_dir, exist_ok=True)
+
+    train_files = []
+    val_files = []
+
+    train_bucket, train_key = s3_accessor.getBucketNameAndPrefix(train_files_remote_path)
+    val_bucket, val_key = s3_accessor.getBucketNameAndPrefix(val_files_remote_path)
+    
+    key_index = 0
+    for key in s3_accessor.getNextKey(bucket=train_bucket, prefixes=[train_key], suffixes=['.jsonl','.json']):
+        if key_index % array_size == array_index:
+            train_files.append(f"s3://{train_bucket}/{key}")
+        key_index+=1
+
+    val_files =[f"s3://{val_bucket}/{key}" for key in s3_accessor.getNextKey(bucket=val_bucket, prefixes=[val_key], suffixes=['.jsonl','.json'])]
+
+    # copy files from s3 to local
+    copy_s3_to_local(train_files, val_files, train_files_local_dir, val_files_local_dir)
+
+    # run the main function
+    main(train_files_local_dir, val_files_local_dir, result_dir)
