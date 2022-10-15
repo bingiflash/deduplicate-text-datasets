@@ -44,6 +44,7 @@ def get_files(path):
                 files.append(os.path.join(path, file))
     return files
 
+# TODO: maybe think of a way to do this parallelly
 def extract_lines_from_jsonl_files(files, output_file, include_newline=True):
     with open(output_file, 'wb') as of:
         for file in tqdm(files):
@@ -55,18 +56,16 @@ def extract_lines_from_jsonl_files(files, output_file, include_newline=True):
                         of.write('\n'.encode('utf-8'))
                     else:
                         of.write(get_line_seperator())
-    
-def remove_lines_from_a_file(file_path, lines_to_remove):
-    file = open(file_path, 'r')
-    lines = file.readlines()
-    file.close()
-    # for safety, remove the file
-    os.remove(file_path)
-    file = open(file_path, 'w')
-    for i in range(len(lines)):
-        if i not in lines_to_remove:
-            file.write(lines[i])
-    file.close()
+def remove_lines_from_file(file, lines_to_remove):
+    lines = []
+    with open(file, 'r') as f:
+        lines = f.readlines()
+    with open(file, 'w') as f:
+        for i, line in enumerate(lines):
+            if i not in lines_to_remove:
+                f.write(line)
+            else:
+                f.write('\n')
 
 def main(train_files_path, val_files_path, result_dir):
     val_files = get_files(val_files_path)
@@ -76,45 +75,43 @@ def main(train_files_path, val_files_path, result_dir):
     os.makedirs(temp_folder, exist_ok=True)
 
     dataset_contamination_rate = 0
-    total_val_lines = 0
     total_val_contaminated_lines = set()
 
     modified_val_file = os.path.join(temp_folder, 'val.txt')
-    print("Extracting lines from val files...")
-    tic = time.time()
     extract_lines_from_jsonl_files(val_files, modified_val_file)
-    print("Extracting lines from val files took {} seconds".format(time.time() - tic))
     # find no.of lines in val file using wc
-    val_batch_lines = int(os.popen(f"wc -l {modified_val_file}").read().split(' ')[0])
-    print(val_batch_lines)
-    total_val_lines += val_batch_lines
-    for train_file in train_files:
+    total_val_lines = int(os.popen(f"wc -l {modified_val_file}").read().split(' ')[0])
+
+    for index, train_file in enumerate(train_files):
         modified_train_file = os.path.join(temp_folder, 'train.txt')
-        print("Extracting lines from train file: ", train_file)
-        tic = time.time()
         extract_lines_from_jsonl_files([train_file], modified_train_file, include_newline=False)
-        print("Extracting lines from train file took {} seconds".format(time.time() - tic))
-        print(f"Validation file: {modified_val_file}, Training file: {train_file}")
-        # if size of val file is 0, skip
-        if os.path.getsize(modified_val_file) == 0:
-            print("Skipping rest of the files as val file is empty")
-            break
-        tic = time.time()
+        batch_train_lines = int(os.popen(f"wc -l {modified_train_file}").read().split(' ')[0])
+
+        print(f"Validation file: {modified_val_file}({total_val_lines}), Training file: {train_file}({batch_train_lines})")
+        # if no.of words in val files is 0, skip this file
+        if int(os.popen(f"wc -w {modified_val_file}").read().split(' ')[0]) == 0:
+            print("Skipping rest of the training files as no.of words in val file is 0")
+            continue
+
         rust_result = os.popen(f"cargo run contains --data-file {modified_train_file} --query-file {modified_val_file} --gram-size 8 --num-threads {os.cpu_count() or 1}").read()
-        print("Rust execution took {} seconds".format(time.time() - tic))
         print(rust_result)
+
         val_batch_contaminated_lines = find_no_of_contaminated_lines_from_rust_result(rust_result)
         total_val_contaminated_lines.update(val_batch_contaminated_lines)
+        
         print("=========================================")
-        remove_lines_from_a_file(modified_val_file, val_batch_contaminated_lines)
+        remove_lines_from_file(modified_val_file, val_batch_contaminated_lines)
 
     dataset_contamination_rate = len(total_val_contaminated_lines) / total_val_lines
+    
     line_indicies_file_path = os.path.join(temp_folder, f'{unique_id}-{array_index}-contaminated_lines.txt')
     with open(line_indicies_file_path, 'w') as f:
         f.write(json.dumps(list(total_val_contaminated_lines)))
         f.write("\n")
+    
     # copy contaminated lines s3 result dir
     s3_accessor.upload(f"{result_dir.strip('/')}/{unique_id}/{array_index}-contaminated_lines.txt", line_indicies_file_path)
+    
     print(f"Dataset contamination rate: {dataset_contamination_rate}")
 
 

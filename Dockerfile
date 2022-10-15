@@ -16,4 +16,6 @@ ADD entrypoint.sh /opt/source_code/entrypoint.sh
 WORKDIR /opt/source_code
 
 RUN cargo build
+RUN chmod 777 entrypoint.sh
+
 ENTRYPOINT ["/opt/source_code/entrypoint.sh"]

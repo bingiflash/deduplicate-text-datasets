@@ -1233,7 +1233,6 @@ fn generate_ngrams(s: String, n: u32) -> Vec<String> {
     // Break sentence in the token, remove empty tokens
     let tokens = s.split(' ').filter(|token| !token.is_empty());
 
-    
     // Use the zip function to help us generate n-grams
     // Concatentate the tokens into ngrams and return
     let ngrams = tokens.map(|token| token.to_string()).collect::<Vec<String>>();
@@ -1250,15 +1249,12 @@ fn generate_ngrams(s: String, n: u32) -> Vec<String> {
 // TODO: rewrite using pyo3 for easier cross-language integration
 fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_threads: usize) -> std::io::Result<()>{
     let now = Instant::now();
-    println!("Reading the dataset at time t={}ms", now.elapsed().as_millis());
     let mut text_ = Vec::with_capacity(std::fs::metadata(data_file.clone()).unwrap().len() as usize);
     fs::File::open(data_file.clone()).unwrap().read_to_end(&mut text_)?;
     let text = &text_;
-    println!("Done reading the dataset at time t={}ms", now.elapsed().as_millis());
-    println!("... and now starting the suffix array construction.");
     
     let st = table::SuffixTable::new(text);
-    println!("Done building suffix array at t={}ms",now.elapsed().as_millis());
+    println!("Suffix array construction completed in {}ms",now.elapsed().as_millis());
     
     let q_file = File::open(query_file)?;
     let q_reader = BufReader::new(q_file);
@@ -1266,10 +1262,13 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
     fn worker(st: &table::SuffixTable, lines: Vec<String>, ngram_size:  usize, worker_index_offset: usize) -> Vec<usize> {
         // contaminated lines list
         let mut contaminated_lines: Vec<usize> = Vec::with_capacity(lines.len());
-        let worker_start =Instant::now();
         // enumerate over the lines
         for (i, line) in lines.iter().enumerate() {
-            let ngrams = generate_ngrams(line.clone(), ngram_size as u32);
+            // if line is just \n, skip it
+            if line.len() == 1 && line.as_bytes()[0] == 10 {
+                continue;
+            }
+            let ngrams = generate_ngrams(line.to_string(), ngram_size as u32);
             let length_of_ngrams = ngrams.len();
             let mut ngram_match_count = 0;
             for ngram in ngrams {
@@ -1279,12 +1278,10 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
             }
             let match_ratio = ngram_match_count as f64 / length_of_ngrams as f64;
             let threshold = 0.7;
-            // println!("{} {} {}", line.clone(), match_ratio, match_ratio >= threshold);
             if match_ratio >= threshold {
                 contaminated_lines.push(i+worker_index_offset);
             }
         }
-        println!("Worker finished in {}ms", worker_start.elapsed().as_millis());
         //  return contaminated lines
         return contaminated_lines
     }
@@ -1298,7 +1295,6 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
 
     let _answer = crossbeam::scope(|scope| {
         let chunk_size = lines.len() / num_threads;
-        println!("Chunk size: {}", chunk_size);
         for i in 0..num_threads {
             let st = &st;
             let start = i * chunk_size;
@@ -1311,19 +1307,15 @@ fn cmd_contains(data_file: &String, query_file: &String, ngram_size: usize, num_
                 worker(st, sub_lines, ngram_size, i*chunk_size)
             });
             handles.push(handle);
-            println!("Spawned thread {}", i);
         }
         for handle in handles {
             let temp_contaminated_lines = handle.join();
-            // println!("temp_contaminated_lines {:?}", temp_contaminated_lines);
             final_contaminated_lines.extend(temp_contaminated_lines);
         }
     });
-    println!("Done with contains. Took {}ms", before_contains.elapsed().as_millis());
+    println!("Contains operation on data file took {}ms", before_contains.elapsed().as_millis());
     
-    // print contaminated lines vector
     println!("{:?}", final_contaminated_lines);
-    // println!("{}", count);
 
     Ok(())
 }
