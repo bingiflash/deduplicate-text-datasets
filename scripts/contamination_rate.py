@@ -6,7 +6,7 @@ import time
 import uuid
 
 # if AWS_BATCH_JOB_ID exists, use it as unique id else use uuid
-unique_id = os.environ.get('AWS_BATCH_JOB_ID', str(uuid.uuid4()))
+unique_id = os.environ.get('AWS_BATCH_JOB_ID', str(uuid.uuid4())).split(':')[0]
 
 import s3_accessor
 from tqdm import tqdm
