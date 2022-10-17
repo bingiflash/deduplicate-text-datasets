@@ -1,5 +1,6 @@
 import argparse
 import json
+import mmap
 import os
 import shutil
 import time
@@ -14,6 +15,8 @@ from tqdm import tqdm
 data_dir = './data'
 temp_folder = './tmp/rate'
 content_column = "text"
+filter_columns = ["identity_attack", "insult","obscene","severe_toxicity","sexual_explicit","threat","toxicity"]
+filter_threshold = 0.5
 
 def get_line_seperator():
     return b"\xff\xff"
@@ -48,14 +51,22 @@ def get_files(path):
 def extract_lines_from_jsonl_files(files, output_file, include_newline=True):
     with open(output_file, 'wb') as of:
         for file in tqdm(files):
-            with open(file, 'r') as f:
-                for line in f.readlines():
-                    modified_line = json.loads(line)[content_column].replace('\n', ' ')
-                    of.write(modified_line.encode('utf-8'))
-                    if include_newline:
-                        of.write('\n'.encode('utf-8'))
-                    else:
-                        of.write(get_line_seperator())
+            with open(file, mode="r", encoding="utf-8") as f:
+                with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_READ) as mmap_in:
+                    while True:
+                        line = mmap_in.readline()
+                        if not line:
+                            break
+                        json_line = json.loads(line)
+                        if not any(column in json_line and float(json_line[column]) >= filter_threshold for column in filter_columns):
+                            modified_line = json_line[content_column].replace('\n', ' ')
+                            of.write(modified_line.encode('utf-8'))
+                            if include_newline:
+                                of.write("\n".encode('utf-8'))
+                            else:
+                                of.write(get_line_seperator())
+
+                            
 def remove_lines_from_file(file, lines_to_remove):
     lines = []
     with open(file, 'r') as f:
