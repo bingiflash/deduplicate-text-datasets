@@ -62,7 +62,7 @@ def extract_lines_from_jsonl_files(files, output_file, include_newline=True):
                             break
                         json_line = json.loads(line)
                         if not any(column in json_line and float(json_line[column]) >= filter_threshold for column in filter_columns):
-                            modified_line = json_line[content_column].replace('\n', ' ')
+                            modified_line = json_line[content_column].replace('\n', ' ').replace('\r', ' ')
                             of.write(modified_line.encode('utf-8'))
                             if include_newline:
                                 of.write("\n".encode('utf-8'))
