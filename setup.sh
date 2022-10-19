@@ -8,6 +8,6 @@ source "$HOME/.cargo/env"
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
-pip install transformers s3urls boto3
+pip install transformers s3urls boto3 datasets
 
 cargo build

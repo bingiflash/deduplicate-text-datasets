@@ -5,6 +5,7 @@ import os
 import shutil
 import time
 import uuid
+from collections import defaultdict
 
 # if AWS_BATCH_JOB_ID exists, use it as unique id else use uuid
 unique_id = os.environ.get('AWS_BATCH_JOB_ID', str(uuid.uuid4())).split(':')[0]
@@ -17,6 +18,7 @@ temp_folder = './tmp/rate'
 content_column = "text"
 filter_columns = ["identity_attack", "insult","obscene","severe_toxicity","sexual_explicit","threat","toxicity"]
 filter_threshold = 0.5
+val_line_map = {}
 
 def get_line_seperator():
     return b"\xff\xff"
@@ -49,6 +51,7 @@ def get_files(path):
 
 # TODO: maybe think of a way to do this parallelly
 def extract_lines_from_jsonl_files(files, output_file, include_newline=True):
+    line_count = 0
     with open(output_file, 'wb') as of:
         for file in tqdm(files):
             with open(file, mode="r", encoding="utf-8") as f:
@@ -63,8 +66,11 @@ def extract_lines_from_jsonl_files(files, output_file, include_newline=True):
                             of.write(modified_line.encode('utf-8'))
                             if include_newline:
                                 of.write("\n".encode('utf-8'))
+                                line_count += 1
                             else:
                                 of.write(get_line_seperator())
+            if include_newline:
+                val_line_map[file.split('/')[-1]] = line_count
 
                             
 def remove_lines_from_file(file, lines_to_remove):
@@ -86,7 +92,8 @@ def main(train_files_path, val_files_path, result_dir):
     os.makedirs(temp_folder, exist_ok=True)
 
     dataset_contamination_rate = 0
-    total_val_contaminated_lines = set()
+    # total_val_contaminated_lines = set()
+    contaminated_map = defaultdict(list)
 
     modified_val_file = os.path.join(temp_folder, 'val.txt')
     extract_lines_from_jsonl_files(val_files, modified_val_file)
@@ -108,16 +115,26 @@ def main(train_files_path, val_files_path, result_dir):
         print(rust_result)
 
         val_batch_contaminated_lines = find_no_of_contaminated_lines_from_rust_result(rust_result)
-        total_val_contaminated_lines.update(val_batch_contaminated_lines)
+        # total_val_contaminated_lines.update(val_batch_contaminated_lines)
+        last_high = 0
+        for key, val in val_line_map.items():
+            for i in range(last_high, val):
+                if i in val_batch_contaminated_lines:
+                    contaminated_map[key].append(i)
+            last_high = val
         
         print("=========================================")
         remove_lines_from_file(modified_val_file, val_batch_contaminated_lines)
 
-    dataset_contamination_rate = len(total_val_contaminated_lines) / total_val_lines
+    # dataset_contamination_rate = len(total_val_contaminated_lines) / total_val_lines
+    print(val_line_map)
+    for key, val in val_line_map.items():
+        print(f"dataset contamination rate for {key} is {len(contaminated_map[key]) / val}")
+        # print(f"dataset_contamination_rate for {key} is {len(val) / val_line_map[key]}")
     
     line_indicies_file_path = os.path.join(temp_folder, f'{unique_id}-{array_index}-contaminated_lines.txt')
     with open(line_indicies_file_path, 'w') as f:
-        f.write(json.dumps(list(total_val_contaminated_lines)))
+        f.write(json.dumps(contaminated_map))
         f.write("\n")
     
     # copy contaminated lines s3 result dir

@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from collections import defaultdict
 
 import s3_accessor
 from tqdm import tqdm
@@ -15,15 +16,15 @@ def main(result_dir):
         s3_accessor.download_to_local(result_file, local_result_dir)
     
     # aggregate the results
-    total_contaminated_lines = set()
-    total_lines = 1716438
+    contaminated_lines_map = defaultdict(list)
     for result_file in tqdm(os.listdir(local_result_dir)):
         with open(os.path.join(local_result_dir, result_file), 'r') as f:
-            total_contaminated_lines.update(json.load(f))
+            json_map = json.load(f)
+            for key, value in json_map.items():
+                contaminated_lines_map[key].extend(value)
     
-    print(f"Total contaminated lines: {len(total_contaminated_lines)}")
-    print(f"Total lines: {total_lines}")
-    print(f"Contamination rate: {len(total_contaminated_lines) / total_lines}")
+    for key, value in contaminated_lines_map.items():
+        print(f"{key}: {len(value)}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -8,3 +8,7 @@ tmp/*
 data/*
 Cargo.lock
 scripts/__pycache__/*
+implicit_relations.json
+temp*
+implicit_relations/*
+test_data/*
