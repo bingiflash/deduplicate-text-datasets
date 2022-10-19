@@ -16,12 +16,12 @@ def main(result_dir):
         s3_accessor.download_to_local(result_file, local_result_dir)
     
     # aggregate the results
-    contaminated_lines_map = defaultdict(list)
+    contaminated_lines_map = defaultdict(set)
     for result_file in tqdm(os.listdir(local_result_dir)):
         with open(os.path.join(local_result_dir, result_file), 'r') as f:
             json_map = json.load(f)
             for key, value in json_map.items():
-                contaminated_lines_map[key].extend(value)
+                contaminated_lines_map[key].update(value)
     
     for key, value in contaminated_lines_map.items():
         print(f"{key}: {len(value)}")
